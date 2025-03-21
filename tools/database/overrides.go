@@ -21,6 +21,10 @@ var ItemOverrides = []*proto.UIItem{
 		},
 	}}},
 
+	{Id: 237512, WeaponDamageMin: 350, WeaponDamageMax: 525, WeaponSpeed: 3.8, Stats: []float64{
+		55, 0, -30, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	}},
+
 	// Updated profession items not updated in the AtlasLoot DB
 	// Crimson Silk Robe
 	{Id: 217245, Sources: []*proto.UIItemSource{{Source: &proto.UIItemSource_Crafted{Crafted: &proto.CraftedSource{Profession: proto.Profession_Tailoring, SpellId: 439085}}}}},

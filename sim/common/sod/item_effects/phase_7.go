@@ -3,6 +3,7 @@ package item_effects
 import (
 	"time"
 
+	"github.com/wowsims/sod/sim/common/itemhelpers"
 	"github.com/wowsims/sod/sim/core"
 	"github.com/wowsims/sod/sim/core/proto"
 	"github.com/wowsims/sod/sim/core/stats"
@@ -74,27 +75,88 @@ func init() {
 	// https://www.wowhead.com/classic/item=237512/blade-of-inquisition
 	// Equip: Chance on hit to Increase your Strength by 250 and movement speed by 15% for 15 sec. (15s cooldown)
 	// TODO: Verify proc chance, 1ppm for now
-	core.NewItemEffect(BladeOfInquisition, func(agent core.Agent) {
-		character := agent.GetCharacter()
+	itemhelpers.CreateWeaponProcSpell(BladeOfInquisition, "Blade of Inquisition", 1.0, func(character *core.Character) *core.Spell {
+		var buffName string
+		var stat stats.Stat
+		var finalBuffStats stats.Stats
+		var finalBuffSpellID int32
+		var stackingBuffSpellID int32
 
-		dpm := character.AutoAttacks.NewDynamicProcManagerForWeaponEffect(BladeOfInquisition, 1.0, 0)
+		if character.Class == proto.Class_ClassHunter {
+			buffName = "Corrupted Agility"
+			stat = stats.Agility
+			finalBuffStats = stats.Stats{stats.Agility: 200}
+			finalBuffSpellID = 1231409
+			stackingBuffSpellID = 1231406
+		} else {
+			buffName = "Corrupted Strength"
+			stat = stats.Strength
+			finalBuffStats = stats.Stats{stats.Strength: 200}
+			finalBuffSpellID = 1230596
+			stackingBuffSpellID = 1231339
+		}
 
-		buffAura := character.NewTemporaryStatsAura("Scarlet Inquisition", core.ActionID{SpellID: 1223342}, stats.Stats{stats.Strength: 250}, time.Second*15)
+		ashbringerAura := character.NewTemporaryStatsAura("Ashbringer", core.ActionID{SpellID: finalBuffSpellID}, finalBuffStats, time.Second*30)
 
-		triggerAura := core.MakeProcTriggerAura(&character.Unit, core.ProcTrigger{
-			Name:              "Blade of Inquisition Trigger",
-			Callback:          core.CallbackOnSpellHitDealt,
-			Outcome:           core.OutcomeLanded,
-			SpellFlagsExclude: core.SpellFlagSuppressEquipProcs,
-			ICD:               time.Second * 15,
-			DPM:               dpm,
-			DPMProcCheck:      core.DPMProc,
-			Handler: func(sim *core.Simulation, spell *core.Spell, result *core.SpellResult) {
-				buffAura.Activate(sim)
+		corruptedStatAura := character.RegisterAura(core.Aura{
+			Label:     buffName,
+			ActionID:  core.ActionID{SpellID: stackingBuffSpellID},
+			Duration:  time.Second * 20,
+			MaxStacks: 5,
+			OnStacksChange: func(aura *core.Aura, sim *core.Simulation, oldStacks, newStacks int32) {
+				character.AddStatDynamic(sim, stat, 30.0*float64(newStacks-oldStacks))
+
+				if newStacks == aura.MaxStacks {
+					ashbringerAura.Activate(sim)
+					aura.Deactivate(sim)
+				}
 			},
 		})
 
-		character.ItemSwap.RegisterProc(BladeOfInquisition, triggerAura)
+		actionID := core.ActionID{SpellID: 1231330}
+		healthMetrics := character.NewHealthMetrics(actionID)
+		numTargets := min(corruptedStatAura.MaxStacks, character.Env.GetNumTargets())
+		return character.RegisterSpell(core.SpellConfig{
+			ActionID:    actionID,
+			DefenseType: core.DefenseTypeMagic,
+			SpellSchool: core.SpellSchoolShadow,
+			ProcMask:    core.ProcMaskEmpty,
+
+			DamageMultiplier: 1.0,
+			ThreatMultiplier: 1.0,
+			// BonusCoefficient: 1.0,
+
+			ApplyEffects: func(sim *core.Simulation, target *core.Unit, spell *core.Spell) {
+				if numTargets == 0 {
+					return
+				}
+
+				results := make([]*core.SpellResult, numTargets)
+				for idx := range results {
+					damage := sim.RollWithLabel(475, 525, "Ashbringer")
+					results[idx] = spell.CalcDamage(sim, target, damage, spell.OutcomeAlwaysHit)
+					target = sim.Environment.NextTargetUnit(target)
+				}
+
+				core.StartDelayedAction(sim, core.DelayedActionOptions{
+					DoAt:     sim.CurrentTime + time.Second*1,
+					Priority: core.ActionPriorityLow,
+					OnAction: func(sim *core.Simulation) {
+						for _, result := range results {
+							spell.DealDamage(sim, result)
+							character.GainHealth(sim, result.Damage, healthMetrics)
+						}
+
+						if ashbringerAura.IsActive() {
+							return
+						}
+
+						corruptedStatAura.Activate(sim)
+						corruptedStatAura.AddStacks(sim, numTargets)
+					},
+				})
+			},
+		})
 	})
 
 	// https://www.wowhead.com/classic/item=235894/doomsayers-demise
